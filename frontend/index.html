@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTCMarkets Exchange Spreads</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 90%;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-weight: 300;
+            color: #2c3e50;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        select {
+            padding: 10px 15px;
+            border: 2px solid #e1e8ed;
+            border-radius: 6px;
+            background-color: white;
+            font-size: 14px;
+            color: #333;
+            min-width: 150px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        select:hover {
+            border-color: #cbd5e0;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        .data-container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-top: 20px;
+        }
+
+        #chart-container {
+            height: 500px;
+            width: 100%;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 16px;
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #e74c3c;
+            font-size: 16px;
+        }
+
+        .spread-data {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .volume-section {
+            border: 1px solid #e1e8ed;
+            border-radius: 6px;
+            padding: 20px;
+        }
+
+        .volume-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2c3e50;
+            text-align: center;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .price-row:last-child {
+            border-bottom: none;
+        }
+
+        .price-label {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .price-value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+        }
+
+        .buy-price {
+            color: #27ae60;
+        }
+
+        .sell-price {
+            color: #e74c3c;
+        }
+
+        .spread {
+            background-color: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .spread-data {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BTCMarkets Exchange Spreads</h1>
+
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="market-select">Market:</label>
+                <select id="market-select">
+                    <option value="">Select a market...</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="candle-select">Candle:</label>
+                <select id="candle-select">
+                    <option value="5m">5 minutes</option>
+                    <option value="30m">30 minutes</option>
+                    <option value="1h" selected>1 hour</option>
+                    <option value="1d">1 day</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="data-container">
+            <div id="loading" class="loading">Select a market to view spread data</div>
+            <div id="error" class="error" style="display: none;"></div>
+            <div id="chart-container" style="display: none;">
+                <canvas id="priceChart"></canvas>
+            </div>
+            <div id="spread-data" class="spread-data" style="display: none;"></div>
+        </div>
+        <a class="container" href="https://github.com/tbsherlock/marketScrape">github</a>
+    </div>
+
+    <script>
+        let currentData = null;
+        let parsedData = null;
+        let priceChart = null;
+        let allCandleOptions = []; // Store all candle options for filtering
+	    const API_BASE_URL = 'https://zbgk68xmaf.execute-api.ap-southeast-2.amazonaws.com/prod';
+
+        // DOM elements
+        const marketSelect = document.getElementById('market-select');
+        const candleSelect = document.getElementById('candle-select');
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
+        const dataDiv = document.getElementById('spread-data');
+
+        // Load markets on page load
+        loadMarkets();
+
+        // Event listeners
+        marketSelect.addEventListener('change', handleMarketChange);
+        candleSelect.addEventListener('change', handleCandleChange);
+
+        async function loadMarkets() {
+            try {
+		        //const marketid = marketSelect.value
+
+		        //let url = `${API_BASE_URL}/data/${marketid}`;
+		        let url = `${API_BASE_URL}/markets`;
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to fetch markets');
+
+                const market_data = await response.json();
+
+                // Clear existing options (except first)
+                marketSelect.innerHTML = '<option value="">Select a market...</option>';
+                candleSelect.innerHTML = '<option value="">Select a candle...</option>';
+                
+                // Clear stored candle options
+                allCandleOptions = [];
+
+                // Track unique market names (without time periods) for market select
+                const uniqueMarkets = new Set();
+                
+                // Add market options (strip time period suffixes for market select)
+                market_data['markets'].forEach(market => {
+                    // Strip time period suffixes (_1m, _1h, _1d) for market select
+                    const baseMarket = market.replace(/_[1-9]+[mhd]$/, '');
+                    
+                    // Add to market select only if not already added
+                    if (!uniqueMarkets.has(baseMarket)) {
+                        const option = document.createElement('option');
+                        option.value = baseMarket;
+                        option.textContent = baseMarket.toUpperCase();
+                        marketSelect.appendChild(option);
+                        uniqueMarkets.add(baseMarket);
+                    }
+                    
+                    // Store full market name with time period for later filtering
+                    allCandleOptions.push({
+                        value: market,
+                        textContent: market.toUpperCase()
+                    });
+                });
+
+            } catch (error) {
+                showError('Failed to load markets: ' + error.message);
+            }
+        }
+
+        async function handleMarketChange() {
+            const selectedMarket = marketSelect.value;
+
+            if (!selectedMarket) {
+                showLoading('Select a market to view spread data');
+                currentData = null;
+                // Clear candle select when no market is selected
+                candleSelect.innerHTML = '<option value="">Select a candle...</option>';
+                return;
+            }
+
+            // Filter candle options to only show those matching the selected market
+            candleSelect.innerHTML = '<option value="">Select a candle...</option>';
+            
+            allCandleOptions.forEach(option => {
+                if (option.value && option.value.startsWith(selectedMarket + '_')) {
+                    const candleOption = document.createElement('option');
+                    candleOption.value = option.value;
+                    candleOption.textContent = option.textContent;
+                    candleSelect.appendChild(candleOption);
+                }
+            });
+
+            showLoading('Select a candle to view spread data');
+            currentData = null;
+        }
+
+        async function handleCandleChange() {
+            const selectedCandle = candleSelect.value;
+            const selectedMarket = marketSelect.value;
+
+            if (!selectedCandle || !selectedMarket) {
+                showLoading('Select a market and candle to view spread data');
+                currentData = null;
+                return;
+            }
+
+            showLoading('Loading spread data...');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/data/${selectedCandle}`);
+                if (!response.ok) throw new Error('Failed to fetch data');
+
+                currentData = await response.json();
+                parseData();
+                updateDisplay();
+
+            } catch (error) {
+                showError('Failed to load data: ' + error.message);
+                currentData = null;
+            }
+        }
+
+        function parseData() {
+            if (!currentData) return;
+            parsedData = [];
+
+            for (let i = 0; i < currentData['items'].length; i++) {
+
+                console.log(currentData['items'][i]);
+                console.log("data: " + currentData['items'][i]['data']);
+
+                const [
+                open, high, low, close,
+                min, q1, q2, q3, max
+                ] = currentData['items'][i]['data'];
+
+                data_dict = {
+                    'open': open,
+                    'high': high,
+                    'low': low,
+                    'close': close,
+                    'min': min,
+                    'q1': q1,
+                    'q2': q2,
+                    'q3': q3,
+                    'max': max,
+                    'timestamp': currentData['items'][i]['timestamp']
+                };
+                parsedData.push(data_dict);
+            }
+
+        }
+
+        function updateDisplay() {
+            if (!parsedData) return;
+            console.log("parsedData" + parsedData)
+
+            const timestamps = [];
+            const boxPlotData = [];
+
+            parsedData.forEach(item => {
+                const timestamp = new Date(item['timestamp']);
+                
+                // Extract box plot statistics: min, q1, q2(median), q3, max
+                //const min = parseFloat(item['min']);
+                //const q1 = parseFloat(item['q1']);
+                //const q2 = parseFloat(item['q2']); // median
+                //const q3 = parseFloat(item['q3']);
+                //const max = parseFloat(item['max']);
+
+                const min = Math.round(parseFloat(item['min']) * 100) / 100;
+                const q1 = Math.round(parseFloat(item['q1']) * 100) / 100;
+                const q2 = Math.round(parseFloat(item['q2']) * 100) / 100;
+                const q3 = Math.round(parseFloat(item['q3']) * 100) / 100;
+                const max = Math.round(parseFloat(item['max']) * 100) / 100;
+
+                timestamps.push(timestamp);
+                boxPlotData.push({
+                    x: timestamp,
+                    min: min,
+                    q1: q1,
+                    median: q2,
+                    q3: q3,
+                    max: max
+                });
+            });
+
+            if (priceChart) {
+                priceChart.destroy();
+            }
+
+            console.log("FDSAFDSFDSAFDSA");
+
+            // Determine time format based on selected candle
+            const selectedCandle = candleSelect.value;
+            let timeFormat, timeUnit;
+            
+            if (selectedCandle.includes('_1d')) {
+                timeFormat = 'MMM dd';
+                timeUnit = 'day';
+            } else if (selectedCandle.includes('_1h')) {
+                timeFormat = 'HH:mm';
+                timeUnit = 'hour';
+            } else if (selectedCandle.includes('_30m')) {
+                timeFormat = 'HH:mm';
+                timeUnit = 'hour';
+            } else if (selectedCandle.includes('_5m')) {
+                timeFormat = 'HH:mm';
+                timeUnit = 'hour';
+            } else {
+                // Default fallback
+                timeFormat = 'MMM dd HH:mm';
+                timeUnit = 'hour';
+            }
+
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            priceChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: timestamps,
+                    datasets: [
+                        // Min to Q1 (lower whisker to box bottom)
+                        {
+                            label: 'Min to Q1',
+                            data: boxPlotData.map(d => [d.min, d.q1]),
+                            backgroundColor: 'rgba(108, 117, 125, 0.3)',
+                            borderColor: '#6c757d',
+                            borderWidth: 1,
+                            barThickness: 20
+                        },
+                        // Q1 to Q3
+                        {
+                            label: 'Q1 to Q3',
+                            data: boxPlotData.map(d => [d.q1, d.q3]),
+                            backgroundColor: 'rgba(52, 152, 219, 0.6)',
+                            borderColor: '#3498db',
+                            borderWidth: 2,
+                            barThickness: 20
+                        },
+                        // Q3 to Max (box top to upper whisker)
+                        {
+                            label: 'Q3 to Max',
+                            data: boxPlotData.map(d => [d.q3, d.max]),
+                            backgroundColor: 'rgba(108, 117, 125, 0.3)',
+                            borderColor: '#6c757d',
+                            borderWidth: 1,
+                            barThickness: 20
+                        },
+                        // Median line
+                        {
+                            label: 'Median',
+                            data: boxPlotData.map(d => d.median),
+                            type: 'line',
+                            borderColor: '#e74c3c',
+                            backgroundColor: '#e74c3c',
+                            borderWidth: 3,
+                            pointRadius: 2,
+                            pointHoverRadius: 4,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${candleSelect.value.toUpperCase()} - Spread Distribution Box Plot`
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            stacked: true,
+                            time: {
+                                unit: timeUnit,
+                                displayFormats: {
+                                    [timeUnit]: timeFormat
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    }
+                }
+            });
+
+            showChart();
+        }
+
+        function showLoading(message) {
+            loadingDiv.textContent = message;
+            loadingDiv.style.display = 'block';
+            errorDiv.style.display = 'none';
+            dataDiv.style.display = 'none';
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            loadingDiv.style.display = 'none';
+            dataDiv.style.display = 'none';
+        }
+
+        function showData() {
+            dataDiv.style.display = 'grid';
+            loadingDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+        }
+
+        function showChart() {
+            document.getElementById('chart-container').style.display = 'block';
+            dataDiv.style.display = 'none';
+            loadingDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
